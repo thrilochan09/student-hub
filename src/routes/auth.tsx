@@ -9,6 +9,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import mascot from "@/assets/mascot.png";
 
+
 export const Route = createFileRoute("/auth")({
   ssr: false,
   head: () => ({
@@ -60,12 +61,17 @@ function AuthPage() {
   }
 
   async function googleSignIn() {
-    const result = await lovable.auth.signInWithOAuth("google", { redirect_uri: window.location.origin });
-    if (result.error) { toast.error(result.error.message ?? "Google sign-in failed"); return; }
-    if (result.redirected) return;
-    navigate({ to: "/dashboard", replace: true });
-  }
+  const { error } = await supabase.auth.signInWithOAuth({
+    provider: "google",
+    options: {
+      redirectTo: window.location.origin,
+    },
+  });
 
+  if (error) {
+    toast.error(error.message);
+  }
+}
   return (
     <div className="min-h-screen grid lg:grid-cols-2">
       <div className="hidden lg:flex flex-col justify-between bg-primary text-primary-foreground p-12">
