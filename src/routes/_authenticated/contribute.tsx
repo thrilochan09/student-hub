@@ -28,6 +28,7 @@ function Contribute() {
     exam_type: "sem",
     year: new Date().getFullYear(),
   });
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
 
   const { data: subjects = [] } = useQuery({
     queryKey: ["subjects-lite"],
@@ -49,15 +50,29 @@ function Contribute() {
   const submit = useMutation({
     mutationFn: async () => {
       if (!form.subject_id) throw new Error("Please pick a subject");
-      if (!form.title || !form.pdf_url) throw new Error("Title and PDF link are required");
+      if (!form.title) throw new Error("Title is required");
+      if (!selectedFile) throw new Error("Please select a PDF");
       const { data: u } = await supabase.auth.getUser();
+      const fileName = `${Date.now()}-${selectedFile.name}`;
+
+      const { error: uploadError } = await supabase.storage
+      .from("pdfs")
+      .upload(fileName, selectedFile);
+
+      if (uploadError) throw uploadError;
+
+      const { data: publicUrlData } = supabase.storage
+      .from("pdfs")
+      .getPublicUrl(fileName);
+
+      const pdfUrl = publicUrlData.publicUrl;
       if (!u.user) throw new Error("Not signed in");
       const payload: any = {
         submitter_id: u.user.id,
         kind,
         subject_id: form.subject_id,
         title: form.title,
-        pdf_url: form.pdf_url,
+        pdf_url: pdfUrl,
       };
       if (kind === "note") payload.note_category = form.note_category;
       else {
@@ -148,12 +163,20 @@ function Contribute() {
           <Input required value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} placeholder="e.g. Unit 3 — Complete notes" />
         </div>
         <div>
-          <Label>PDF link</Label>
-          <Input required type="url" value={form.pdf_url} onChange={(e) => setForm({ ...form, pdf_url: e.target.value })} placeholder="https://…" />
-          <p className="mt-1 text-xs text-muted-foreground">
-            Host the file on Drive/Dropbox/etc. and paste the public link.
-          </p>
-        </div>
+         <Label>Upload PDF</Label>
+           <Input
+             type="file"
+                 accept=".pdf"
+                  onChange={(e) => {
+                if (e.target.files?.[0]) {
+         setSelectedFile(e.target.files[0]);
+     }
+  }}
+/>
+<p className="mt-1 text-xs text-muted-foreground">
+  Select a PDF file to upload.
+</p>
+</div>
 
         <Button type="submit" disabled={submit.isPending} className="w-full">
           {submit.isPending ? "Submitting…" : "Send for review"}
