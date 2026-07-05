@@ -29,10 +29,17 @@ function AuthPage() {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => {
-      if (data.user) navigate({ to: "/dashboard", replace: true });
-    });
-  }, [navigate]);
+  const isResetPage =
+    window.location.pathname === "/reset-password";
+
+  if (isResetPage) return;
+
+  supabase.auth.getUser().then(({ data }) => {
+    if (data.user) {
+      navigate({ to: "/dashboard", replace: true });
+    }
+  });
+}, [navigate]);
 
   async function signIn(e: React.FormEvent) {
     e.preventDefault();
@@ -119,6 +126,14 @@ function AuthPage() {
                 <div className="space-y-1"><Label>Email</Label><Input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} /></div>
                 <div className="space-y-1"><Label>Password</Label><Input type="password" required value={password} onChange={(e) => setPassword(e.target.value)} /></div>
                 <Button type="submit" disabled={loading} className="w-full h-11">Sign in</Button>
+                <div className="text-center mt-3">
+             <a
+            href="/forgot-password"
+            className="text-sm text-blue-600 hover:underline"
+            >
+            Forgot Password?
+                 </a>
+               </div>
               </form>
             </TabsContent>
             <TabsContent value="signup">
