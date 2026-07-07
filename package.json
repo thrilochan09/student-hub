@@ -12,8 +12,11 @@
     "format": "prettier --write ."
   },
   "dependencies": {
+    "@ai-sdk/google": "^4.0.8",
+    "@ai-sdk/openai": "^4.0.8",
     "@ai-sdk/openai-compatible": "^3.0.1",
     "@ai-sdk/react": "^4.0.5",
+    "@ai-sdk/xai": "^4.0.7",
     "@fontsource/instrument-sans": "^5.2.8",
     "@fontsource/newsreader": "^5.2.10",
     "@hookform/resolvers": "^5.2.2",

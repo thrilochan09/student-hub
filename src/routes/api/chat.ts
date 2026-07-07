@@ -1,60 +1,102 @@
-import { createLovableAiGatewayProvider } from "@/lib/ai-gateway.server";
 import { createFileRoute } from "@tanstack/react-router";
 import { convertToModelMessages, streamText, type UIMessage } from "ai";
 import { createClient } from "@supabase/supabase-js";
+import { google } from "@ai-sdk/google";
+import { openai } from "@ai-sdk/openai";
+import { xai } from "@ai-sdk/xai";
 
 const SYSTEM = `You are Student Hub's AI tutor for engineering students.
-Answer in clear, exam-oriented language. When the user asks for a "2-mark", "5-mark", or "10-mark"
-answer, scale depth accordingly: 2-mark = 2 crisp lines + key formula; 5-mark = 5-8 line explanation
-with one example; 10-mark = structured answer with definition, diagram description, derivation/example,
-and 3-5 bullet points of importance. Use markdown headings, bullets, and code blocks where helpful.
-If a subject code or name is provided in brackets, tailor the answer to that subject.`;
+Answer clearly, naturally, and accurately.
+Do not force 2-mark, 5-mark, or 10-mark format unless the user specifically asks for it.
+Explain concepts step by step when needed.
+Use examples, tables, bullets, and code blocks where helpful.
+Be friendly but not childish.
+If the question is complex, provide a clear structured explanation.
+If unsure, admit it instead of guessing.`;
 
 export const Route = createFileRoute("/api/chat")({
   server: {
     handlers: {
       POST: async ({ request }) => {
-        // Require an authenticated Supabase user. The /api/chat endpoint is
-        // independently reachable, so we must validate the bearer token here
-        // — protecting the UI route is not enough.
         const authHeader = request.headers.get("authorization") ?? "";
+
         if (!authHeader.startsWith("Bearer ")) {
           return new Response("Unauthorized", { status: 401 });
         }
+
         const token = authHeader.slice("Bearer ".length).trim();
+
         if (!token || token.split(".").length !== 3) {
           return new Response("Unauthorized", { status: 401 });
         }
 
         const SUPABASE_URL = process.env.SUPABASE_URL;
         const SUPABASE_PUBLISHABLE_KEY = process.env.SUPABASE_PUBLISHABLE_KEY;
+
         if (!SUPABASE_URL || !SUPABASE_PUBLISHABLE_KEY) {
           return new Response("Server misconfigured", { status: 500 });
         }
+
         const supabase = createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
-          auth: { storage: undefined, persistSession: false, autoRefreshToken: false },
+          auth: {
+            storage: undefined,
+            persistSession: false,
+            autoRefreshToken: false,
+          },
         });
-        const { data: claimsData, error: claimsError } = await supabase.auth.getClaims(token);
+
+        const { data: claimsData, error: claimsError } =
+          await supabase.auth.getClaims(token);
+
         if (claimsError || !claimsData?.claims?.sub) {
           return new Response("Unauthorized", { status: 401 });
         }
 
         const body = (await request.json()) as { messages?: unknown };
-        if (!Array.isArray(body.messages)) return new Response("Messages required", { status: 400 });
 
-        const key = process.env.LOVABLE_API_KEY;
-        if (!key) return new Response("Missing LOVABLE_API_KEY", { status: 500 });
+        if (!Array.isArray(body.messages)) {
+          return new Response("Messages required", { status: 400 });
+        }
 
-        const gateway = createLovableAiGatewayProvider(key);
-        const model = gateway("google/gemini-3-flash-preview");
+        const provider = process.env.AI_PROVIDER ?? "gemini";
+
+        let model;
+
+        if (provider === "gemini") {
+          if (!process.env.GOOGLE_GENERATIVE_AI_API_KEY) {
+            return new Response("Missing GOOGLE_GENERATIVE_AI_API_KEY", {
+              status: 500,
+            });
+          }
+
+          model = google("gemini-2.5-flash");
+        } else if (provider === "openai") {
+          if (!process.env.OPENAI_API_KEY) {
+            return new Response("Missing OPENAI_API_KEY", { status: 500 });
+          }
+
+          model = openai("gpt-4o-mini");
+        } else if (provider === "grok") {
+          if (!process.env.XAI_API_KEY) {
+            return new Response("Missing XAI_API_KEY", { status: 500 });
+          }
+
+          model = xai("grok-2-latest");
+        } else {
+          return new Response("Invalid AI_PROVIDER", { status: 500 });
+        }
 
         const messages = body.messages as UIMessage[];
+
         const result = streamText({
           model,
           system: SYSTEM,
           messages: await convertToModelMessages(messages),
         });
-        return result.toUIMessageStreamResponse({ originalMessages: messages });
+
+        return result.toUIMessageStreamResponse({
+          originalMessages: messages,
+        });
       },
     },
   },
