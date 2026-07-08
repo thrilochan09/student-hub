@@ -2,6 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { convertToModelMessages, streamText, type UIMessage } from "ai";
 import { createClient } from "@supabase/supabase-js";
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
+import { PDFParse } from "pdf-parse";
 
 const SYSTEM = `
 You are Student Hub's AI Tutor.
@@ -9,11 +10,52 @@ You are Student Hub's AI Tutor.
 Rules:
 - Keep answers clear and short.
 - For normal study questions, explain simply.
+- If attachment content is provided, answer using that attachment.
 - If LIVE WEB SEARCH RESULTS are provided, use ONLY those results.
-- If web results conflict with your memory, ignore your memory.
-- Never call live web data a mistake or inconsistency.
+- If web results conflict with memory, ignore memory.
 - For current/latest questions, do not answer from memory.
 `;
+
+function getDataFromDataUrl(dataUrl: string) {
+  const base64 = dataUrl.split(",")[1];
+  return Buffer.from(base64, "base64");
+}
+
+async function extractAttachmentText(messages: UIMessage[]) {
+  let attachmentText = "";
+
+  for (const message of messages) {
+    for (const part of message.parts as any[]) {
+      if (part.type !== "file") continue;
+
+      const mediaType = part.mediaType ?? "";
+      const fileName = part.filename ?? "attachment";
+      const url = part.url ?? "";
+
+      if (!url?.startsWith("data:")) continue;
+
+      const buffer = getDataFromDataUrl(url);
+
+      if (mediaType.includes("pdf")) {
+        const parser = new PDFParse({ data: buffer });
+        const parsed = await parser.getText();
+        await parser.destroy();
+
+        attachmentText += `\n\nPDF Attachment: ${fileName}\n${parsed.text}`;
+      }
+
+      if (mediaType.includes("text")) {
+        attachmentText += `\n\nText Attachment: ${fileName}\n${buffer.toString("utf-8")}`;
+      }
+
+      if (mediaType.includes("image")) {
+        attachmentText += `\n\nImage Attachment: ${fileName}\nThe user uploaded an image.`;
+      }
+    }
+  }
+
+  return attachmentText.trim();
+}
 
 export const Route = createFileRoute("/api/chat")({
   server: {
@@ -70,12 +112,21 @@ export const Route = createFileRoute("/api/chat")({
         });
 
         const model = openrouter("openrouter/free");
-
         const messages = body.messages as UIMessage[];
+
+        let attachmentText = "";
+
+        try {
+          attachmentText = await extractAttachmentText(messages);
+        } catch (error) {
+          console.error("Attachment parse error:", error);
+          attachmentText =
+            "The user uploaded an attachment, but the server could not read it properly.";
+        }
 
         const lastMessageText =
           messages[messages.length - 1]?.parts
-            ?.map((part: any) => part.text ?? "")
+            ?.map((part: any) => (part.type === "text" ? part.text : ""))
             .join(" ") ?? "";
 
         const needsWebSearch =
@@ -103,7 +154,7 @@ export const Route = createFileRoute("/api/chat")({
             const searchData = await searchResponse.json();
 
             webContext =
-              "IMPORTANT: Use ONLY these live web search results. Ignore your old training data:\n\n" +
+              "IMPORTANT: Use ONLY these live web search results:\n\n" +
               searchData.results
                 ?.map(
                   (r: any, i: number) =>
@@ -113,11 +164,23 @@ export const Route = createFileRoute("/api/chat")({
           }
         }
 
+        const extraContext = [
+          attachmentText ? `ATTACHMENT CONTENT:\n${attachmentText}` : "",
+          webContext,
+        ]
+          .filter(Boolean)
+          .join("\n\n");
+
+        const cleanMessages = messages.map((message) => ({
+          ...message,
+          parts: message.parts.filter((part: any) => part.type === "text"),
+        }));
+
         const result = streamText({
           model,
           temperature: 0,
-          system: webContext ? `${SYSTEM}\n\n${webContext}` : SYSTEM,
-          messages: await convertToModelMessages(messages),
+          system: extraContext ? `${SYSTEM}\n\n${extraContext}` : SYSTEM,
+          messages: await convertToModelMessages(cleanMessages),
         });
 
         return result.toUIMessageStreamResponse({

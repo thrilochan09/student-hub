@@ -501,32 +501,88 @@ function SubjectPicker({ value, onChange }: { value: string; onChange: (v: strin
     </Select>
   );
 }
+async function uploadPdf(file: File) {
+  const fileName = `${Date.now()}-${file.name}`;
+
+  const { error } = await supabase.storage
+    .from("pdfs")
+    .upload(fileName, file);
+
+  if (error) throw error;
+
+  const { data } = supabase.storage.from("pdfs").getPublicUrl(fileName);
+  return data.publicUrl;
+}
 
 function PapersAdmin() {
   const qc = useQueryClient();
-  const [form, setForm] = useState({ subject_id: "", year: new Date().getFullYear(), exam_type: "sem", title: "", pdf_url: "" });
+  const [pdfFile, setPdfFile] = useState<File | null>(null);
+  const [form, setForm] = useState({
+    subject_id: "",
+    year: new Date().getFullYear(),
+    exam_type: "sem",
+    title: "",
+  });
+
   const { data = [] } = useQuery({
     queryKey: ["all-papers"],
-    queryFn: async () => (await supabase.from("previous_papers").select("*, subject:subjects(code,name)").order("created_at", { ascending: false }).limit(50)).data ?? [],
+    queryFn: async () =>
+      (await supabase
+        .from("previous_papers")
+        .select("*, subject:subjects(code,name)")
+        .order("created_at", { ascending: false })
+        .limit(50)).data ?? [],
   });
+
   const add = useMutation({
     mutationFn: async () => {
       if (!form.subject_id) throw new Error("Pick a subject");
-      const { error } = await supabase.from("previous_papers").insert({ ...form, year: Number(form.year) } as any);
+      if (!form.title) throw new Error("Title is required");
+      if (!pdfFile) throw new Error("Please upload a PDF");
+
+      const pdf_url = await uploadPdf(pdfFile);
+
+      const { error } = await supabase.from("previous_papers").insert({
+        ...form,
+        year: Number(form.year),
+        pdf_url,
+      } as any);
+
       if (error) throw error;
     },
-    onSuccess: () => { toast.success("Paper added"); setForm({ subject_id: "", year: new Date().getFullYear(), exam_type: "sem", title: "", pdf_url: "" }); qc.invalidateQueries({ queryKey: ["all-papers"] }); qc.invalidateQueries({ queryKey: ["papers"] }); },
+    onSuccess: () => {
+      toast.success("Paper added");
+      setForm({
+        subject_id: "",
+        year: new Date().getFullYear(),
+        exam_type: "sem",
+        title: "",
+      });
+      setPdfFile(null);
+      qc.invalidateQueries({ queryKey: ["all-papers"] });
+      qc.invalidateQueries({ queryKey: ["papers"] });
+    },
     onError: (e: Error) => toast.error(e.message),
   });
+
   const remove = useMutation({
-    mutationFn: async (id: string) => { const { error } = await supabase.from("previous_papers").delete().eq("id", id); if (error) throw error; },
-    onSuccess: () => { toast.success("Deleted"); qc.invalidateQueries({ queryKey: ["all-papers"] }); },
+    mutationFn: async (id: string) => {
+      const { error } = await supabase.from("previous_papers").delete().eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      toast.success("Deleted");
+      qc.invalidateQueries({ queryKey: ["all-papers"] });
+    },
   });
+
   return (
     <div className="grid lg:grid-cols-3 gap-6">
       <form onSubmit={(e) => { e.preventDefault(); add.mutate(); }} className="space-y-3 rounded-2xl bg-card ring-1 ring-border p-5">
         <h3 className="font-serif text-lg">Add paper</h3>
+
         <div><Label>Subject</Label><SubjectPicker value={form.subject_id} onChange={(v) => setForm({ ...form, subject_id: v })} /></div>
+
         <div className="grid grid-cols-2 gap-3">
           <div><Label>Year</Label><Input type="number" required value={form.year} onChange={(e) => setForm({ ...form, year: Number(e.target.value) })} /></div>
           <div><Label>Type</Label>
@@ -536,10 +592,18 @@ function PapersAdmin() {
             </Select>
           </div>
         </div>
+
         <div><Label>Title</Label><Input required value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} /></div>
-        <div><Label>PDF URL</Label><Input required type="url" value={form.pdf_url} onChange={(e) => setForm({ ...form, pdf_url: e.target.value })} placeholder="https://…" /></div>
+
+        <div>
+          <Label>Upload PDF</Label>
+          <Input type="file" accept="application/pdf,.pdf" onChange={(e) => setPdfFile(e.target.files?.[0] ?? null)} />
+          {pdfFile && <p className="text-xs text-muted-foreground mt-1">Selected: {pdfFile.name}</p>}
+        </div>
+
         <Button type="submit" disabled={add.isPending} className="w-full">Add paper</Button>
       </form>
+
       <div className="lg:col-span-2 rounded-2xl bg-card ring-1 ring-border divide-y divide-border max-h-[600px] overflow-auto">
         {data.length === 0 && <div className="p-6 text-sm text-muted-foreground">No papers yet.</div>}
         {data.map((p: any) => (
@@ -555,39 +619,80 @@ function PapersAdmin() {
 
 function NotesAdmin() {
   const qc = useQueryClient();
-  const [form, setForm] = useState({ subject_id: "", category: "unit", title: "", pdf_url: "" });
+  const [pdfFile, setPdfFile] = useState<File | null>(null);
+  const [form, setForm] = useState({ subject_id: "", category: "unit", title: "" });
+
   const { data = [] } = useQuery({
     queryKey: ["all-notes"],
-    queryFn: async () => (await supabase.from("notes").select("*, subject:subjects(code,name)").order("created_at", { ascending: false }).limit(50)).data ?? [],
+    queryFn: async () =>
+      (await supabase
+        .from("notes")
+        .select("*, subject:subjects(code,name)")
+        .order("created_at", { ascending: false })
+        .limit(50)).data ?? [],
   });
+
   const add = useMutation({
     mutationFn: async () => {
       if (!form.subject_id) throw new Error("Pick a subject");
-      const { error } = await supabase.from("notes").insert(form as any);
+      if (!form.title) throw new Error("Title is required");
+      if (!pdfFile) throw new Error("Please upload a PDF");
+
+      const pdf_url = await uploadPdf(pdfFile);
+
+      const { error } = await supabase.from("notes").insert({
+        ...form,
+        pdf_url,
+      } as any);
+
       if (error) throw error;
     },
-    onSuccess: () => { toast.success("Note added"); setForm({ subject_id: "", category: "unit", title: "", pdf_url: "" }); qc.invalidateQueries({ queryKey: ["all-notes"] }); qc.invalidateQueries({ queryKey: ["notes"] }); },
+    onSuccess: () => {
+      toast.success("Note added");
+      setForm({ subject_id: "", category: "unit", title: "" });
+      setPdfFile(null);
+      qc.invalidateQueries({ queryKey: ["all-notes"] });
+      qc.invalidateQueries({ queryKey: ["notes"] });
+    },
     onError: (e: Error) => toast.error(e.message),
   });
+
   const remove = useMutation({
-    mutationFn: async (id: string) => { const { error } = await supabase.from("notes").delete().eq("id", id); if (error) throw error; },
-    onSuccess: () => { toast.success("Deleted"); qc.invalidateQueries({ queryKey: ["all-notes"] }); },
+    mutationFn: async (id: string) => {
+      const { error } = await supabase.from("notes").delete().eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      toast.success("Deleted");
+      qc.invalidateQueries({ queryKey: ["all-notes"] });
+    },
   });
+
   return (
     <div className="grid lg:grid-cols-3 gap-6">
       <form onSubmit={(e) => { e.preventDefault(); add.mutate(); }} className="space-y-3 rounded-2xl bg-card ring-1 ring-border p-5">
         <h3 className="font-serif text-lg">Add note</h3>
+
         <div><Label>Subject</Label><SubjectPicker value={form.subject_id} onChange={(v) => setForm({ ...form, subject_id: v })} /></div>
+
         <div><Label>Category</Label>
           <Select value={form.category} onValueChange={(v) => setForm({ ...form, category: v })}>
             <SelectTrigger><SelectValue /></SelectTrigger>
             <SelectContent>{NOTE_CATEGORIES.map((c) => <SelectItem key={c.value} value={c.value}>{c.label}</SelectItem>)}</SelectContent>
           </Select>
         </div>
+
         <div><Label>Title</Label><Input required value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} /></div>
-        <div><Label>PDF URL</Label><Input required type="url" value={form.pdf_url} onChange={(e) => setForm({ ...form, pdf_url: e.target.value })} placeholder="https://…" /></div>
+
+        <div>
+          <Label>Upload PDF</Label>
+          <Input type="file" accept="application/pdf,.pdf" onChange={(e) => setPdfFile(e.target.files?.[0] ?? null)} />
+          {pdfFile && <p className="text-xs text-muted-foreground mt-1">Selected: {pdfFile.name}</p>}
+        </div>
+
         <Button type="submit" disabled={add.isPending} className="w-full">Add note</Button>
       </form>
+
       <div className="lg:col-span-2 rounded-2xl bg-card ring-1 ring-border divide-y divide-border max-h-[600px] overflow-auto">
         {data.length === 0 && <div className="p-6 text-sm text-muted-foreground">No notes yet.</div>}
         {data.map((n: any) => (
